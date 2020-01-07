@@ -35,7 +35,7 @@ import (
 )
 
 // This is a compile-time validation that gatewaySource is a Source.
-var _ Source = &gatewaySource{}
+var _ Source = &istioGatewaySource{}
 
 var gatewayType = istiomodel.Gateway.Type
 
@@ -61,7 +61,7 @@ func (suite *GatewaySuite) SetupTest() {
 		(fakeIngressGatewayService{
 			ips:       []string{"1.1.1.1"},
 			hostnames: []string{"v42"},
-			namespace: "istio-other",
+			namespace: "istio-system",
 			name:      "istio-gateway2",
 		}).Service(),
 	}
@@ -84,7 +84,7 @@ func (suite *GatewaySuite) SetupTest() {
 
 	suite.config = (fakeGatewayConfig{
 		name:      "foo-gateway-with-targets",
-		namespace: "default",
+		namespace: "istio-system",
 		dnsnames:  [][]string{{"foo"}},
 	}).Config()
 	_, err = fakeIstioClient.Create(suite.config)
@@ -92,9 +92,11 @@ func (suite *GatewaySuite) SetupTest() {
 }
 
 func (suite *GatewaySuite) TestResourceLabelIsSet() {
-	endpoints, _ := suite.source.Endpoints()
+	endpoints, err := suite.source.Endpoints()
+	suite.NoError(err, "should succeed")
+	suite.Equal(len(endpoints), 2, "should return the correct number of endpoints")
 	for _, ep := range endpoints {
-		suite.Equal("gateway/default/foo-gateway-with-targets", ep.Labels[endpoint.ResourceLabelKey], "should set correct resource label")
+		suite.Equal("gateway/istio-system/foo-gateway-with-targets", ep.Labels[endpoint.ResourceLabelKey], "should set correct resource label")
 	}
 }
 
@@ -350,6 +352,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips:       []string{"8.8.8.8"},
 					hostnames: []string{"lb.com"},
 				},
@@ -390,6 +393,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: "testing1",
 					ips:       []string{"8.8.8.8"},
 					hostnames: []string{"lb.com"},
 				},
@@ -415,24 +419,67 @@ func testGatewayEndpoints(t *testing.T) {
 					DNSName: "example.org",
 					Targets: endpoint.Targets{"lb.com"},
 				},
+			},
+		},
+		{
+			title:           "two simple gateways on different namespaces, two ingressgateway loadbalancer service",
+			targetNamespace: "",
+			lbServices: []fakeIngressGatewayService{
 				{
-					DNSName: "new.org",
+					namespace: "testing1",
+					ips:       []string{"8.8.8.8"},
+					hostnames: []string{"lb.com"},
+				},
+				{
+					namespace: "testing2",
+					ips:       []string{"4.4.4.4"},
+					hostnames: []string{"otherlb.com"},
+				},
+			},
+			configItems: []fakeGatewayConfig{
+				{
+					name:      "fake1",
+					namespace: "testing1",
+					dnsnames:  [][]string{{"example.org"}},
+				},
+				{
+					name:      "fake2",
+					namespace: "testing2",
+					dnsnames:  [][]string{{"new.org"}},
+				},
+			},
+			expected: []*endpoint.Endpoint{
+				{
+					DNSName: "example.org",
 					Targets: endpoint.Targets{"8.8.8.8"},
 				},
 				{
-					DNSName: "new.org",
+					DNSName: "example.org",
 					Targets: endpoint.Targets{"lb.com"},
+				},
+				{
+					DNSName: "new.org",
+					Targets: endpoint.Targets{"4.4.4.4"},
+				},
+				{
+					DNSName: "new.org",
+					Targets: endpoint.Targets{"otherlb.com"},
 				},
 			},
 		},
 		{
-			title:           "two simple gateways on different namespaces and a target namespace, one ingressgateway loadbalancer service",
+			title:           "two simple gateways on different namespaces and a target namespace, two ingressgateway loadbalancer services",
 			targetNamespace: "testing1",
 			lbServices: []fakeIngressGatewayService{
 				{
 					ips:       []string{"8.8.8.8"},
 					hostnames: []string{"lb.com"},
 					namespace: "testing1",
+				},
+				{
+					ips:       []string{"4.4.4.4"},
+					hostnames: []string{"otherlb.com"},
+					namespace: "testing2",
 				},
 			},
 			configItems: []fakeGatewayConfig{
@@ -464,6 +511,7 @@ func testGatewayEndpoints(t *testing.T) {
 			annotationFilter: "kubernetes.io/gateway.class in (alb, nginx)",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -490,6 +538,7 @@ func testGatewayEndpoints(t *testing.T) {
 			annotationFilter: "kubernetes.io/gateway.class in (alb, nginx)",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -511,6 +560,7 @@ func testGatewayEndpoints(t *testing.T) {
 			annotationFilter: "kubernetes.io/gateway.name in (a b)",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -533,6 +583,7 @@ func testGatewayEndpoints(t *testing.T) {
 			annotationFilter: "kubernetes.io/gateway.class=nginx",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -559,6 +610,7 @@ func testGatewayEndpoints(t *testing.T) {
 			annotationFilter: "kubernetes.io/gateway.class=nginx",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -579,6 +631,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -604,6 +657,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -624,6 +678,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips:       []string{"8.8.8.8"},
 					hostnames: []string{"elb.com"},
 				},
@@ -655,6 +710,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -676,6 +732,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -706,6 +763,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -760,6 +818,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -812,6 +871,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"1.2.3.4"},
 				},
 			},
@@ -843,6 +903,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"1.2.3.4"},
 				},
 			},
@@ -879,6 +940,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{},
 				},
 			},
@@ -911,6 +973,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips: []string{"8.8.8.8"},
 				},
 			},
@@ -952,6 +1015,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips:       []string{},
 					hostnames: []string{},
 				},
@@ -1006,6 +1070,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips:       []string{},
 					hostnames: []string{},
 				},
@@ -1028,6 +1093,7 @@ func testGatewayEndpoints(t *testing.T) {
 			targetNamespace: "",
 			lbServices: []fakeIngressGatewayService{
 				{
+					namespace: namespace,
 					ips:       []string{"8.8.8.8"},
 					hostnames: []string{"lb.com"},
 				},
@@ -1115,7 +1181,7 @@ func testGatewayEndpoints(t *testing.T) {
 }
 
 // gateway specific helper functions
-func newTestGatewaySource(loadBalancerList []fakeIngressGatewayService) (*gatewaySource, error) {
+func newTestGatewaySource(loadBalancerList []fakeIngressGatewayService) (*istioGatewaySource, error) {
 	fakeKubernetesClient := fake.NewSimpleClientset()
 	fakeIstioClient := NewFakeConfigStore()
 
@@ -1140,7 +1206,7 @@ func newTestGatewaySource(loadBalancerList []fakeIngressGatewayService) (*gatewa
 		return nil, err
 	}
 
-	gwsrc, ok := src.(*gatewaySource)
+	gwsrc, ok := src.(*istioGatewaySource)
 	if !ok {
 		return nil, errors.New("underlying source type was not gateway")
 	}
@@ -1226,6 +1292,7 @@ func NewFakeConfigStore() istiomodel.ConfigStore {
 	return &fakeConfigStore{
 		descriptor: istiomodel.ConfigDescriptor{
 			istiomodel.Gateway,
+			istiomodel.VirtualService,
 		},
 		configs: make([]*istiomodel.Config, 0),
 	}
@@ -1262,7 +1329,9 @@ func (f *fakeConfigStore) List(typ, namespace string) (configs []istiomodel.Conf
 
 	if namespace == "" {
 		for _, cfg := range f.configs {
-			configs = append(configs, *cfg)
+			if cfg.Type == typ {
+				configs = append(configs, *cfg)
+			}
 		}
 	} else {
 		for _, cfg := range f.configs {
